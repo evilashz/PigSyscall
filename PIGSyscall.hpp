@@ -12,23 +12,16 @@
 #include "native.hpp"
 #include "util.hpp"
 
-//#define PROXY_CALL  //ÊÇ·ñ¿ªÆô×Ô¶¨Òå¶ÑÕ»µ÷ÓÃ
-
-//Ìî½øÈ¥hash£¬±ÜÃâ³öÀ´string
+//å¡«è¿›å»hashï¼Œé¿å…å‡ºæ¥string
 // constexpr uint32_t hash
 //using SyscallMap = std::unordered_map<uint32_t, uint32_t>;
-//µÚÒ»¸ö´æAPI Name£¬µÚ¶ş¸öÔòÎªSSN
-using SyscallMap = std::unordered_map<uint32_t, uint32_t>;   //unordered_mapÊ¹ÓÃhash±í£¬²éÕÒĞ§ÂÊ¿ì
+//ç¬¬ä¸€ä¸ªå­˜API Nameï¼Œç¬¬äºŒä¸ªåˆ™ä¸ºSSN
+using SyscallMap = std::unordered_map<uint32_t, uint32_t>;   //unordered_mapä½¿ç”¨hashè¡¨ï¼ŒæŸ¥æ‰¾æ•ˆç‡å¿«
 
 using NtStatus = uint32_t;
 extern uint8_t encrypted_manual_syscall_stub[];
 extern uint8_t encrypted_masked_syscall_stub[];
-extern uint8_t WorkCallback_stub[];
 
-
-//typedef NTSTATUS(NTAPI* TPALLOCWORK)(PTP_WORK* ptpWrk, PTP_WORK_CALLBACK pfnwkCallback, PVOID OptionalArg, PTP_CALLBACK_ENVIRON CallbackEnvironment);
-typedef VOID(NTAPI* TPPOSTWORK)(PTP_WORK);
-typedef VOID(NTAPI* TPRELEASEWORK)(PTP_WORK);
 
 namespace pigsyscall {
 
@@ -50,46 +43,16 @@ private:
     template<typename... ServiceArgs>
     NtStatus InternalCaller(uint32_t syscall_no, uintptr_t stub_addr, ServiceArgs... args) noexcept {
 
-#ifdef PROXY_CALL
 
-        FARPROC pTpAllocWork = GetProcAddress(GetModuleHandleA("ntdll"), "TpAllocWork");
-        FARPROC pTpPostWork = GetProcAddress(GetModuleHandleA("ntdll"), "TpPostWork");
-        FARPROC pTpReleaseWork = GetProcAddress(GetModuleHandleA("ntdll"), "TpReleaseWork");
+    using StubDef = NtStatus(__stdcall*)(uint32_t, ServiceArgs...);
+    StubDef stub = reinterpret_cast<decltype(stub)>(stub_addr);
+    //decrypt stub
+    //strlen maybe not beauty?
+    pigsyscall::utils::CryptPermute((PVOID)stub_addr, strlen((char*)stub_addr), FALSE);
+    NtStatus return_value = stub(syscall_no, std::forward<ServiceArgs>(args)...);   //å®Œç¾è½¬å‘ï¼Œæ˜¯æŒ‡std::forwardä¼šå°†è¾“å…¥çš„å‚æ•°åŸå°ä¸åŠ¨åœ°ä¼ é€’åˆ°ä¸‹ä¸€ä¸ªå‡½æ•°ä¸­
 
-        //std::size_t argsize = sizeof...(ServiceArgs);
-        //auto data = std::make_tuple(std::forward<ServiceArgs>(args)...);
-
-        //std::size_t argBufferSize = argsize * sizeof(char*);
-        //WorkCallbackArgAddr = (char*)malloc(argBufferSize);
-        //memset(WorkCallbackArgAddr, 0x00, argBufferSize);
-
-        //OperateTuple(data);
-        typedef NTSTATUS(NTAPI* TPALLOCWORK)(PTP_WORK* ptpWrk, PTP_WORK_CALLBACK pfnwkCallback, uint32_t syscall_no, ServiceArgs... args, PTP_CALLBACK_ENVIRON CallbackEnvironment);
-
-        using StubDef = NtStatus(__stdcall*)(uint32_t, ServiceArgs...);
-        
-        StubDef stub = reinterpret_cast<decltype(stub)>(&WorkCallback_stub);
-
-        PTP_WORK WorkReturn = NULL;
-        ((TPALLOCWORK)pTpAllocWork)(&WorkReturn, (PTP_WORK_CALLBACK)&stub, syscall_no, std::forward<ServiceArgs>(args)..., NULL);
-        ((TPPOSTWORK)pTpPostWork)(WorkReturn);
-        ((TPRELEASEWORK)pTpReleaseWork)(WorkReturn);
-
-        WaitForSingleObject((HANDLE)-1, 0x1000);
-
-        //free(WorkCallbackArgAddr);
-
-#else
-        using StubDef = NtStatus(__stdcall*)(uint32_t, ServiceArgs...);
-        StubDef stub = reinterpret_cast<decltype(stub)>(stub_addr);
-        //decrypt stub
-        //strlen maybe not beauty?
-        pigsyscall::utils::CryptPermute((PVOID)stub_addr, strlen((char*)stub_addr), FALSE);
-        NtStatus return_value = stub(syscall_no, std::forward<ServiceArgs>(args)...);   //ÍêÃÀ×ª·¢£¬ÊÇÖ¸std::forward»á½«ÊäÈëµÄ²ÎÊıÔ­·â²»¶¯µØ´«µİµ½ÏÂÒ»¸öº¯ÊıÖĞ
-
-#endif
-        return 1;
-    }
+    return 1;
+}
 
 public:
 
@@ -100,7 +63,7 @@ public:
     syscall& operator=(syscall&&) = delete;
 
     // Singleton instance getter
-    // µ¥ÀıÄ£Ê½¹¹Ôì
+    // å•ä¾‹æ¨¡å¼æ„é€ 
     static inline syscall& get_instance() noexcept {
         static syscall instance{};
         return instance;
